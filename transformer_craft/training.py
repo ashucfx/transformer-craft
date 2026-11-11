@@ -14,11 +14,40 @@ from tqdm import tqdm
 from .config import ModelConfig, TrainingConfig
 
 
+class RunLogger:
+    def __init__(self, output_dir: str | Path) -> None:
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.events_path = self.output_dir / "events.jsonl"
+
+    def log(self, event: str, **values: float | int | str) -> None:
+        payload = {"event": event, **values}
+        with self.events_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, sort_keys=True) + "\n")
+
+
 def seed_everything(seed: int) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def _random_state() -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "python": random.getstate(),
+        "torch": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["cuda"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def _restore_random_state(state: dict[str, Any]) -> None:
+    random.setstate(state["python"])
+    torch.set_rng_state(state["torch"])
+    if torch.cuda.is_available() and "cuda" in state:
+        torch.cuda.set_rng_state_all(state["cuda"])
 
 
 def resolve_device(value: str) -> torch.device:
@@ -60,6 +89,7 @@ def save_checkpoint(
         "step": step,
         "model_config": model_config.to_dict(),
         "training_config": training_config.to_dict(),
+        "random_state": _random_state(),
     }
     with tempfile.NamedTemporaryFile(dir=target.parent, suffix=".tmp", delete=False) as handle:
         temporary = Path(handle.name)
@@ -103,6 +133,7 @@ def train(
     output_dir: str | Path,
     resume_from: str | Path | None = None,
     validation_loader: DataLoader[dict[str, torch.Tensor]] | None = None,
+    run_metadata: dict[str, str] | None = None,
 ) -> list[float]:
     seed_everything(training_config.seed)
     device = resolve_device(training_config.device)
@@ -115,6 +146,13 @@ def train(
     scheduler = build_scheduler(optimizer, training_config)
     use_amp = training_config.mixed_precision and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+    logger = RunLogger(output_dir)
+    logger.log(
+        "run_started",
+        device=str(device),
+        max_steps=training_config.max_steps,
+        **(run_metadata or {}),
+    )
     start_step = 0
     if resume_from is not None:
         checkpoint = load_checkpoint(resume_from, map_location=device)
@@ -122,6 +160,8 @@ def train(
         optimizer.load_state_dict(checkpoint["optimizer"])
         scheduler.load_state_dict(checkpoint["scheduler"])
         scaler.load_state_dict(checkpoint["scaler"])
+        if "random_state" in checkpoint:
+            _restore_random_state(checkpoint["random_state"])
         start_step = int(checkpoint["step"])
         if start_step >= training_config.max_steps:
             return []
@@ -148,9 +188,15 @@ def train(
             optimizer.zero_grad(set_to_none=True)
             scheduler.step()
         losses.append(float(loss.detach().item() * training_config.gradient_accumulation_steps))
+        logger.log("step", step=step + 1, loss=losses[-1], learning_rate=scheduler.get_last_lr()[0])
         evaluation_interval = max(training_config.max_steps // 10, 1)
         if validation_loader is not None and (step + 1) % evaluation_interval == 0:
             validation_losses.append(evaluate(model, validation_loader, device))
+            logger.log(
+                "validation",
+                step=step + 1,
+                loss=validation_losses[-1],
+            )
             model.train()
         if (step + 1) % max(training_config.max_steps // 10, 1) == 0:
             save_checkpoint(
@@ -172,6 +218,7 @@ def train(
         + "\n",
         encoding="utf-8",
     )
+    logger.log("run_completed", step=training_config.max_steps)
     if validation_losses:
         (Path(output_dir) / "metrics.json").write_text(
             json.dumps(

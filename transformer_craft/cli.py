@@ -158,6 +158,7 @@ def run_train(args: argparse.Namespace) -> None:
         args.output_dir,
         resume_from=args.resume_from,
         validation_loader=validation_loader,
+        run_metadata={"objective": args.objective},
     )
 
 

@@ -25,6 +25,8 @@ def test_training_writes_loadable_checkpoint(tmp_path: Path) -> None:
     checkpoint = load_checkpoint(tmp_path / "latest.pt")
     assert checkpoint["step"] == 2
     assert "model_config" in checkpoint
+    assert "random_state" in checkpoint
+    assert (tmp_path / "events.jsonl").is_file()
 
 
 def test_training_can_resume_from_checkpoint(tmp_path: Path) -> None:
@@ -71,3 +73,29 @@ def test_training_writes_validation_metrics(tmp_path: Path) -> None:
     train(model, loader, model_config, training_config, tmp_path, validation_loader=loader)
     assert (tmp_path / "metrics.json").is_file()
     assert evaluate(model, loader, torch.device("cpu")) > 0
+
+
+def test_run_events_include_validation_and_completion(tmp_path: Path) -> None:
+    model_config = ModelConfig(
+        max_sequence_length=4,
+        embedding_dimension=8,
+        attention_heads=2,
+        layers=1,
+        feed_forward_dimension=16,
+        dropout=0.0,
+    )
+    training_config = TrainingConfig(max_steps=1, batch_size=1, device="cpu", mixed_precision=False)
+    dataset = CausalDataset([1, 2, 3, 4], sequence_length=4)
+    model = CausalTransformer(model_config)
+    train(
+        model,
+        DataLoader(dataset, batch_size=1),
+        model_config,
+        training_config,
+        tmp_path,
+        validation_loader=DataLoader(dataset, batch_size=1),
+        run_metadata={"objective": "causal"},
+    )
+    events = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+    assert '"event": "validation"' in events
+    assert '"event": "run_completed"' in events
