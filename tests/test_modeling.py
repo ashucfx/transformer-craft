@@ -1,7 +1,11 @@
 import torch
 
 from transformer_craft.config import ModelConfig
-from transformer_craft.modeling import CausalTransformer, MaskedTransformer
+from transformer_craft.modeling import (
+    CausalTransformer,
+    EncoderDecoderTransformer,
+    MaskedTransformer,
+)
 
 
 def config() -> ModelConfig:
@@ -43,3 +47,31 @@ def test_causal_attention_does_not_use_future_tokens() -> None:
         first_logits = model(first)["logits"]
         second_logits = model(second)["logits"]
     assert torch.allclose(first_logits[:, :-1], second_logits[:, :-1], atol=1e-5)
+
+
+def test_encoder_decoder_shapes_and_teacher_forced_loss() -> None:
+    model = EncoderDecoderTransformer(config())
+    encoder_input_ids = torch.randint(0, 260, (2, 6))
+    decoder_input_ids = torch.randint(0, 260, (2, 5))
+    labels = decoder_input_ids.clone()
+    result = model(
+        encoder_input_ids,
+        decoder_input_ids,
+        encoder_attention_mask=torch.ones(2, 6, dtype=torch.bool),
+        decoder_attention_mask=torch.ones(2, 5, dtype=torch.bool),
+        labels=labels,
+    )
+    assert result["logits"].shape == (2, 5, 260)
+    assert result["loss"].ndim == 0
+
+
+def test_encoder_decoder_uses_encoder_context() -> None:
+    model = EncoderDecoderTransformer(config()).eval()
+    encoder_input_ids = torch.ones(1, 4, dtype=torch.long)
+    changed_encoder_input_ids = encoder_input_ids.clone()
+    changed_encoder_input_ids[0, 0] = 2
+    decoder_input_ids = torch.ones(1, 3, dtype=torch.long)
+    with torch.no_grad():
+        first = model(encoder_input_ids, decoder_input_ids)["logits"]
+        second = model(changed_encoder_input_ids, decoder_input_ids)["logits"]
+    assert not torch.allclose(first, second)
