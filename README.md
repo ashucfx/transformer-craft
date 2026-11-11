@@ -19,7 +19,7 @@
 <p>
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10 or newer">
   <img src="https://img.shields.io/badge/PyTorch-2.2%2B-EE4C2C?style=flat-square&logo=pytorch&logoColor=white" alt="PyTorch 2.2 or newer">
-  <img src="https://img.shields.io/badge/Tests-28%20passing-2EA44F?style=flat-square" alt="28 tests passing">
+  <img src="https://img.shields.io/badge/Tests-32%20passing-2EA44F?style=flat-square" alt="32 tests passing">
   <img src="https://img.shields.io/badge/License-MIT-6F42C1?style=flat-square" alt="MIT License">
 </p>
 
@@ -74,6 +74,8 @@ framework behavior:
 | Sequence-to-sequence CLI | ✅ Paired source/target training | `--objective seq2seq` |
 | Experiment artifacts | ✅ Checkpoints, config, metrics | `checkpoints/<run>/` |
 | Performance evidence | ✅ Parameters, latency, throughput | `transformer-craft benchmark` |
+| Trainable tokenizer | ✅ Byte-pair encoding with persistence | `BPETokenizer` |
+| Distributed execution | ✅ `torchrun`-compatible DDP | `torchrun ... cli.py train` |
 
 ## Architecture
 
@@ -180,7 +182,9 @@ transformer-craft train `
   --resume-from checkpoints\demo\latest.pt
 ```
 
-Each run can write `latest.pt`, `config.json`, and `metrics.json`.
+Each run can write `latest.pt`, `config.json`, `metrics.json`, `metrics.csv`,
+`summary.json`, and `events.jsonl`. The CSV and JSON outputs are designed for
+notebooks, dashboards, and external experiment trackers.
 
 </details>
 
@@ -214,6 +218,39 @@ transformer-craft train `
 
 The paired dataset prepends BOS to decoder inputs, appends EOS to labels, and
 ignores padded target positions.
+
+</details>
+
+<details>
+<summary><strong>Train a BPE tokenizer</strong></summary>
+
+```python
+from transformer_craft import BPETokenizer
+
+tokenizer = BPETokenizer.train(corpus_text, vocab_size=1024)
+tokenizer.save("artifacts/tokenizer.json")
+```
+
+The tokenizer preserves the four reserved IDs used by the datasets:
+`<pad>`, `<mask>`, `<bos>`, and `<eos>`.
+
+</details>
+
+<details>
+<summary><strong>Run distributed training</strong></summary>
+
+```powershell
+torchrun --standalone --nproc_per_node=2 `
+  -m transformer_craft.cli train `
+  --objective causal `
+  --text-file data\sample.txt `
+  --output-dir checkpoints\distributed `
+  --steps 1000 `
+  --device auto
+```
+
+Only rank zero writes checkpoints, event logs, and summaries. Use a shared
+filesystem for `--output-dir` across workers.
 
 </details>
 
@@ -266,6 +303,13 @@ docker run --rm `
 The image is intentionally CPU-compatible. Use a CUDA-enabled PyTorch base
 image for GPU deployment.
 
+For NVIDIA GPU hosts:
+
+```powershell
+docker build -f Dockerfile.cuda -t transformer-craft:0.2.0-cuda .
+docker run --rm --gpus all transformer-craft:0.2.0-cuda --help
+```
+
 ## Python API
 
 ```python
@@ -306,7 +350,9 @@ tests/
 ├── test_sequence_data.py
 ├── test_training.py
 ├── test_inference.py
-└── test_cli.py
+├── test_cli.py
+├── test_bpe.py
+└── test_distributed.py
 ```
 
 ## Engineering notes
@@ -370,7 +416,7 @@ checkpoint round trips, validation metrics, generation, and CLI parsing.
 | Tokenizer evolution | BPE training and tokenizer benchmarks | Planned |
 | Scale-out | Distributed training and experiment tracking | Planned |
 | Delivery | CI matrix, Docker image, benchmark reports | ✅ |
-| Research scale | BPE tokenizer, distributed training, experiment tracking | Planned |
+| Research scale | BPE tokenizer, distributed training, experiment exports | ✅ |
 
 ## Contributing
 

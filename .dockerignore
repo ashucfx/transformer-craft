@@ -9,4 +9,6 @@ checkpoints
 outputs
 data/raw
 data/cache
+dist
+build
 tests
