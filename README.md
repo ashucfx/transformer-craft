@@ -19,7 +19,7 @@
 <p>
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10 or newer">
   <img src="https://img.shields.io/badge/PyTorch-2.2%2B-EE4C2C?style=flat-square&logo=pytorch&logoColor=white" alt="PyTorch 2.2 or newer">
-  <img src="https://img.shields.io/badge/Tests-22%20passing-2EA44F?style=flat-square" alt="22 tests passing">
+  <img src="https://img.shields.io/badge/Tests-28%20passing-2EA44F?style=flat-square" alt="28 tests passing">
   <img src="https://img.shields.io/badge/License-MIT-6F42C1?style=flat-square" alt="MIT License">
 </p>
 
@@ -73,6 +73,7 @@ framework behavior:
 | Generation | ✅ Temperature and top-k sampling | `transformer-craft generate` |
 | Sequence-to-sequence CLI | ✅ Paired source/target training | `--objective seq2seq` |
 | Experiment artifacts | ✅ Checkpoints, config, metrics | `checkpoints/<run>/` |
+| Performance evidence | ✅ Parameters, latency, throughput | `transformer-craft benchmark` |
 
 ## Architecture
 
@@ -235,6 +236,36 @@ reproducible on the same device.
 
 </details>
 
+<details>
+<summary><strong>Benchmark a checkpoint</strong></summary>
+
+```powershell
+transformer-craft benchmark `
+  --checkpoint checkpoints\demo\latest.pt `
+  --objective causal `
+  --batch-size 4 `
+  --steps 20
+```
+
+The command reports parameter count, milliseconds per step, tokens per second,
+and CUDA peak memory when running on a GPU.
+
+</details>
+
+### Container usage
+
+```powershell
+docker build -t transformer-craft:0.2.0 .
+docker run --rm transformer-craft:0.2.0 --help
+docker run --rm `
+  -v ${PWD}\checkpoints:/app/checkpoints `
+  transformer-craft:0.2.0 benchmark `
+  --checkpoint /app/checkpoints/demo/latest.pt
+```
+
+The image is intentionally CPU-compatible. Use a CUDA-enabled PyTorch base
+image for GPU deployment.
+
 ## Python API
 
 ```python
@@ -265,7 +296,8 @@ transformer_craft/
 ├── modeling.py     attention, blocks, objectives, and cross-attention
 ├── training.py     optimizer, scheduler, checkpoints, and validation
 ├── inference.py    generation and token-weighted evaluation
-└── cli.py          train, evaluate, and generate commands
+├── benchmark.py    throughput and memory benchmark utilities
+└── cli.py          train, evaluate, generate, and benchmark commands
 
 tests/
 ├── test_data.py
@@ -337,7 +369,8 @@ checkpoint round trips, validation metrics, generation, and CLI parsing.
 | Corpus tooling | Recursive multi-file discovery and filtering | ✅ |
 | Tokenizer evolution | BPE training and tokenizer benchmarks | Planned |
 | Scale-out | Distributed training and experiment tracking | Planned |
-| Delivery | CI matrix, Docker image, benchmark reports | Planned |
+| Delivery | CI matrix, Docker image, benchmark reports | ✅ |
+| Research scale | BPE tokenizer, distributed training, experiment tracking | Planned |
 
 ## Contributing
 
