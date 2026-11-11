@@ -19,7 +19,7 @@
 <p>
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10 or newer">
   <img src="https://img.shields.io/badge/PyTorch-2.2%2B-EE4C2C?style=flat-square&logo=pytorch&logoColor=white" alt="PyTorch 2.2 or newer">
-  <img src="https://img.shields.io/badge/Tests-17%20passing-2EA44F?style=flat-square" alt="17 tests passing">
+  <img src="https://img.shields.io/badge/Tests-22%20passing-2EA44F?style=flat-square" alt="22 tests passing">
   <img src="https://img.shields.io/badge/License-MIT-6F42C1?style=flat-square" alt="MIT License">
 </p>
 
@@ -71,6 +71,7 @@ framework behavior:
 | Training | ✅ AMP, clipping, scheduler, resume | `transformer-craft train` |
 | Evaluation | ✅ Loss and perplexity | `transformer-craft evaluate` |
 | Generation | ✅ Temperature and top-k sampling | `transformer-craft generate` |
+| Sequence-to-sequence CLI | ✅ Paired source/target training | `--objective seq2seq` |
 | Experiment artifacts | ✅ Checkpoints, config, metrics | `checkpoints/<run>/` |
 
 ## Architecture
@@ -197,6 +198,25 @@ The evaluator reports token-weighted cross-entropy and perplexity.
 </details>
 
 <details>
+<summary><strong>Train an encoder-decoder model</strong></summary>
+
+Place one source example and one target example on each corresponding line:
+
+```powershell
+transformer-craft train `
+  --objective seq2seq `
+  --text-file data\source.txt `
+  --target-file data\target.txt `
+  --output-dir checkpoints\transform `
+  --steps 1000
+```
+
+The paired dataset prepends BOS to decoder inputs, appends EOS to labels, and
+ignores padded target positions.
+
+</details>
+
+<details>
 <summary><strong>Generate code</strong></summary>
 
 ```powershell
@@ -205,11 +225,13 @@ transformer-craft generate `
   --prompt "def fibonacci(n):" `
   --max-new-tokens 128 `
   --temperature 0.8 `
-  --top-k 40
+  --top-k 40 `
+  --seed 42
 ```
 
 Use `--top-k 1` for greedy-like sampling. Context is automatically bounded by
-the model's configured maximum sequence length.
+the model's configured maximum sequence length. Reusing `--seed` makes sampling
+reproducible on the same device.
 
 </details>
 
