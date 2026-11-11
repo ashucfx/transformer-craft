@@ -11,6 +11,7 @@ Transformer Craft is a from-scratch PyTorch implementation of a compact, extensi
 - Encoder-only masked language modeling
 - Deterministic byte-level tokenization with a reserved vocabulary
 - Gradient accumulation, clipping, mixed precision, and checkpoint resume
+- Temperature/top-k text generation and token-weighted perplexity evaluation
 - Small, testable modules with typed public interfaces
 
 ## Architecture
@@ -49,6 +50,17 @@ transformer-craft train `
   --sequence-length 128
 ```
 
+Resume a run from its last atomic checkpoint:
+
+```powershell
+transformer-craft train `
+  --objective causal `
+  --text-file data\sample.txt `
+  --output-dir checkpoints\demo `
+  --steps 1000 `
+  --resume-from checkpoints\demo\latest.pt
+```
+
 Evaluate a checkpoint:
 
 ```powershell
@@ -58,6 +70,22 @@ transformer-craft evaluate `
   --objective causal
 ```
 
+Generate code from a trained causal checkpoint:
+
+```powershell
+transformer-craft generate `
+  --checkpoint checkpoints\demo\latest.pt `
+  --prompt "def fibonacci(n):" `
+  --max-new-tokens 128 `
+  --temperature 0.8 `
+  --top-k 40
+```
+
+The evaluator reports token-weighted cross-entropy and perplexity rather than an
+unweighted average of batch losses. Generation truncates context to the model's
+configured maximum length and supports deterministic greedy-like sampling through
+`--top-k 1`.
+
 ## Repository layout
 
 ```text
@@ -66,6 +94,7 @@ transformer_craft/
   data.py         tokenizer, windowing, masking, and datasets
   modeling.py     attention, Transformer blocks, and objectives
   training.py     reproducible training and checkpoint lifecycle
+  inference.py    generation and token-weighted evaluation
   cli.py          train and evaluate commands
 tests/
   test_data.py
@@ -77,7 +106,7 @@ tests/
 
 ### Attention
 
-Attention uses fused scaled dot-product attention when available in the installed PyTorch version and falls back to an equivalent explicit implementation. Causal masking is applied inside the attention module, while padding masks remain an explicit caller concern.
+Attention uses PyTorch's scaled dot-product attention primitive. Causal and padding masks are combined inside the attention module so callers cannot accidentally disable causal information flow when batching padded windows.
 
 ### Objectives
 
@@ -85,7 +114,7 @@ The causal objective shifts labels by one position and ignores padding. The mask
 
 ### Reproducibility
 
-Experiments accept a seed and persist the resolved configuration alongside checkpoints. Data ordering, model initialization, and masking use seeded generators. Checkpoints contain model, optimizer, scheduler, scaler, step, and configuration state.
+Experiments accept a seed and persist the resolved configuration alongside checkpoints. Data ordering, model initialization, and masking use seeded generators. Checkpoints contain model, optimizer, scheduler, scaler, step, and configuration state. Checkpoint writes use a temporary file followed by an atomic replacement, preventing a partially written `latest.pt` from being mistaken for a valid run.
 
 ### Operational boundaries
 
