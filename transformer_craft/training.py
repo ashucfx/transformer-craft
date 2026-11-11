@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import random
@@ -280,4 +281,24 @@ def train(
             + "\n",
             encoding="utf-8",
         )
+    with (Path(output_dir) / "metrics.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(("step", "training_loss", "validation_loss"))
+        for index, training_loss in enumerate(losses, start=1):
+            validation_loss = (
+                validation_losses[index // evaluation_interval - 1]
+                if index % evaluation_interval == 0
+                and index // evaluation_interval <= len(validation_losses)
+                else ""
+            )
+            writer.writerow((index, training_loss, validation_loss))
+    summary = {
+        "steps_completed": len(losses),
+        "final_training_loss": losses[-1] if losses else None,
+        "best_validation_loss": min(validation_losses) if validation_losses else None,
+        "validation_points": len(validation_losses),
+    }
+    (Path(output_dir) / "summary.json").write_text(
+        json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+    )
     return losses

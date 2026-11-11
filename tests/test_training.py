@@ -72,6 +72,8 @@ def test_training_writes_validation_metrics(tmp_path: Path) -> None:
     loader = DataLoader(dataset, batch_size=1)
     train(model, loader, model_config, training_config, tmp_path, validation_loader=loader)
     assert (tmp_path / "metrics.json").is_file()
+    assert (tmp_path / "metrics.csv").is_file()
+    assert (tmp_path / "summary.json").is_file()
     assert evaluate(model, loader, torch.device("cpu")) > 0
 
 
