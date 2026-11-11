@@ -1,5 +1,6 @@
 import json
 import random
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -51,22 +52,31 @@ def save_checkpoint(
 ) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "model": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "scheduler": scheduler.state_dict(),
-            "scaler": scaler.state_dict(),
-            "step": step,
-            "model_config": model_config.to_dict(),
-            "training_config": training_config.to_dict(),
-        },
-        target,
-    )
+    payload = {
+        "model": model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict(),
+        "scaler": scaler.state_dict(),
+        "step": step,
+        "model_config": model_config.to_dict(),
+        "training_config": training_config.to_dict(),
+    }
+    with tempfile.NamedTemporaryFile(dir=target.parent, suffix=".tmp", delete=False) as handle:
+        temporary = Path(handle.name)
+    try:
+        torch.save(payload, temporary)
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def load_checkpoint(path: str | Path, map_location: str | torch.device = "cpu") -> dict[str, Any]:
-    return torch.load(path, map_location=map_location, weights_only=False)
+    checkpoint = torch.load(path, map_location=map_location, weights_only=False)
+    required = {"model", "optimizer", "scheduler", "scaler", "step", "model_config"}
+    missing = required.difference(checkpoint)
+    if missing:
+        raise ValueError(f"checkpoint is missing required fields: {sorted(missing)}")
+    return checkpoint
 
 
 def train(
@@ -75,6 +85,7 @@ def train(
     model_config: ModelConfig,
     training_config: TrainingConfig,
     output_dir: str | Path,
+    resume_from: str | Path | None = None,
 ) -> list[float]:
     seed_everything(training_config.seed)
     device = resolve_device(training_config.device)
@@ -87,11 +98,21 @@ def train(
     scheduler = build_scheduler(optimizer, training_config)
     use_amp = training_config.mixed_precision and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+    start_step = 0
+    if resume_from is not None:
+        checkpoint = load_checkpoint(resume_from, map_location=device)
+        model.load_state_dict(checkpoint["model"])
+        optimizer.load_state_dict(checkpoint["optimizer"])
+        scheduler.load_state_dict(checkpoint["scheduler"])
+        scaler.load_state_dict(checkpoint["scaler"])
+        start_step = int(checkpoint["step"])
+        if start_step >= training_config.max_steps:
+            return []
     losses: list[float] = []
     model.train()
     optimizer.zero_grad(set_to_none=True)
     iterator = iter(loader)
-    for step in tqdm(range(training_config.max_steps), desc="training"):
+    for step in tqdm(range(start_step, training_config.max_steps), desc="training"):
         try:
             batch = next(iterator)
         except StopIteration:

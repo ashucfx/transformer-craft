@@ -24,3 +24,31 @@ def test_training_writes_loadable_checkpoint(tmp_path: Path) -> None:
     checkpoint = load_checkpoint(tmp_path / "latest.pt")
     assert checkpoint["step"] == 2
     assert "model_config" in checkpoint
+
+
+def test_training_can_resume_from_checkpoint(tmp_path: Path) -> None:
+    model_config = ModelConfig(
+        max_sequence_length=4,
+        embedding_dimension=8,
+        attention_heads=2,
+        layers=1,
+        feed_forward_dimension=16,
+        dropout=0.0,
+    )
+    first_config = TrainingConfig(max_steps=1, batch_size=1, device="cpu", mixed_precision=False)
+    dataset = CausalDataset([1, 2, 3, 4], sequence_length=4)
+    first_model = CausalTransformer(model_config)
+    train(first_model, DataLoader(dataset, batch_size=1), model_config, first_config, tmp_path)
+
+    second_config = TrainingConfig(max_steps=2, batch_size=1, device="cpu", mixed_precision=False)
+    second_model = CausalTransformer(model_config)
+    losses = train(
+        second_model,
+        DataLoader(dataset, batch_size=1),
+        model_config,
+        second_config,
+        tmp_path,
+        resume_from=tmp_path / "latest.pt",
+    )
+    assert len(losses) == 1
+    assert load_checkpoint(tmp_path / "latest.pt")["step"] == 2

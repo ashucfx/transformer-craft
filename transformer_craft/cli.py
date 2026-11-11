@@ -22,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--sequence-length", type=int, default=128)
     train_parser.add_argument("--seed", type=int, default=42)
     train_parser.add_argument("--device", default="auto")
+    train_parser.add_argument("--resume-from", type=Path)
     evaluate_parser = commands.add_parser("evaluate")
     evaluate_parser.add_argument("--checkpoint", type=Path, required=True)
     evaluate_parser.add_argument("--text-file", type=Path, required=True)
@@ -55,7 +56,14 @@ def run_train(args: argparse.Namespace) -> None:
         )
         model = CausalTransformer(model_config)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
-    train(model, loader, model_config, training_config, args.output_dir)
+    train(
+        model,
+        loader,
+        model_config,
+        training_config,
+        args.output_dir,
+        resume_from=args.resume_from,
+    )
 
 
 def run_evaluate(args: argparse.Namespace) -> None:
