@@ -12,6 +12,7 @@ Transformer Craft is a from-scratch PyTorch implementation of a compact, extensi
 - Deterministic byte-level tokenization with a reserved vocabulary
 - Gradient accumulation, clipping, mixed precision, and checkpoint resume
 - Temperature/top-k text generation and token-weighted perplexity evaluation
+- Deterministic train/validation splits with persisted loss metrics
 - Small, testable modules with typed public interfaces
 
 ## Architecture
@@ -49,6 +50,10 @@ transformer-craft train `
   --batch-size 8 `
   --sequence-length 128
 ```
+
+Training automatically reserves 10% of windows for validation by default. Change
+the split with `--validation-fraction`; the run writes `metrics.json` containing
+training and validation loss samples.
 
 Resume a run from its last atomic checkpoint:
 
@@ -127,7 +132,9 @@ ruff check .
 pytest
 ```
 
-The test suite covers tensor shapes, causal information flow, masking invariants, checkpoint round trips, and deterministic tokenization.
+The test suite covers tensor shapes, causal information flow, masking invariants,
+checkpoint round trips, deterministic tokenization, dataset splitting, and
+validation metrics.
 
 ## License
 
