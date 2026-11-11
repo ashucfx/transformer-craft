@@ -1,54 +1,140 @@
+<div align="center">
+
 # Transformer Craft
 
-Transformer Craft is a from-scratch PyTorch implementation of a compact, extensible language-modeling stack for source code. It provides the core architecture, causal and masked objectives, deterministic data preparation, checkpointing primitives, and a CLI suitable for reproducible experiments.
+### A from-scratch Transformer laboratory for code intelligence
 
-## What this project demonstrates
+<p>
+  <strong>PyTorch</strong> · <strong>Attention</strong> · <strong>MLM</strong> ·
+  <strong>CLM</strong> · <strong>Encoder–Decoder</strong>
+</p>
 
-- Multi-head self-attention with causal masking and optional padding masks
-- Pre-layer-normalized Transformer blocks with residual connections
-- Learned and sinusoidal positional encodings
-- Decoder-only causal language modeling
-- Encoder-only masked language modeling
-- Encoder-decoder sequence modeling with cross-attention and teacher forcing
-- Deterministic byte-level tokenization with a reserved vocabulary
-- Gradient accumulation, clipping, mixed precision, and checkpoint resume
-- Temperature/top-k text generation and token-weighted perplexity evaluation
-- Deterministic train/validation splits with persisted loss metrics
-- Small, testable modules with typed public interfaces
+<p>
+  <a href="https://github.com/ashucfx/transformer-craft">Repository</a> ·
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#roadmap">Roadmap</a>
+</p>
+
+<p>
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10 or newer">
+  <img src="https://img.shields.io/badge/PyTorch-2.2%2B-EE4C2C?style=flat-square&logo=pytorch&logoColor=white" alt="PyTorch 2.2 or newer">
+  <img src="https://img.shields.io/badge/Tests-17%20passing-2EA44F?style=flat-square" alt="17 tests passing">
+  <img src="https://img.shields.io/badge/License-MIT-6F42C1?style=flat-square" alt="MIT License">
+</p>
+
+</div>
+
+> **Build the mechanism. Measure the behavior. Ship the experiment.**
+
+Transformer Craft is a compact, inspectable PyTorch stack for training and
+evaluating Transformer models on source code. Every major layer is implemented
+locally: token preparation, masking, attention, objectives, optimization,
+checkpointing, evaluation, and generation.
+
+<details>
+<summary><strong>Why this project?</strong></summary>
+
+This repository is designed to make the full language-modeling path easy to
+read, run, test, and extend. It favors explicit contracts over hidden
+framework behavior:
+
+- byte-preserving tokenization for arbitrary UTF-8 code
+- causal, masked, and sequence-to-sequence objectives
+- deterministic corpus discovery and validation splits
+- atomic checkpoints with optimizer and scheduler state
+- small public APIs backed by focused tests
+
+</details>
+
+## Contents
+
+- [Capability map](#capability-map)
+- [Architecture](#architecture)
+- [Quickstart](#quickstart)
+- [CLI cookbook](#cli-cookbook)
+- [Python API](#python-api)
+- [Project map](#project-map)
+- [Engineering notes](#engineering-notes)
+- [Quality gates](#quality-gates)
+- [Roadmap](#roadmap)
+- [License](#license)
+
+## Capability map
+
+| Area | Available now | Entry point |
+|---|---|---|
+| Causal language modeling | ✅ Next-token prediction | `CausalTransformer` |
+| Masked language modeling | ✅ Masked-token prediction | `MaskedTransformer` |
+| Sequence transformation | ✅ Cross-attention + teacher forcing | `EncoderDecoderTransformer` |
+| Code ingestion | ✅ Recursive, filtered, deterministic | `discover_code_files` |
+| Training | ✅ AMP, clipping, scheduler, resume | `transformer-craft train` |
+| Evaluation | ✅ Loss and perplexity | `transformer-craft evaluate` |
+| Generation | ✅ Temperature and top-k sampling | `transformer-craft generate` |
+| Experiment artifacts | ✅ Checkpoints, config, metrics | `checkpoints/<run>/` |
 
 ## Architecture
 
-```text
-Text files
-   |
-   v
-ByteTokenizer -> fixed-length token windows -> DataLoader
-   |
-   +--> CausalTransformer -> next-token loss
-   |
-   +--> MaskedTransformer  -> masked-token loss
-   |
-   +--> EncoderDecoderTransformer -> source-to-target loss
+```mermaid
+flowchart LR
+    A[Code files] --> B[Corpus discovery]
+    B --> C[ByteTokenizer]
+    C --> D[Fixed-length datasets]
+    D --> E{Objective}
+    E --> F[CausalTransformer]
+    E --> G[MaskedTransformer]
+    E --> H[EncoderDecoderTransformer]
+    F --> I[Loss / perplexity]
+    G --> J[Masked-token loss]
+    H --> K[Teacher-forced loss]
+    I --> L[Checkpoint + metrics]
+    J --> L
+    K --> L
+    L --> M[Generation / evaluation]
 ```
 
-The default tokenizer is intentionally dependency-free. It preserves every UTF-8 byte, which makes it robust for arbitrary code and avoids an implicit vocabulary-training phase. A future tokenizer can implement the same protocol without changing the model or training APIs.
+### Attention paths
 
-For paired transformation tasks, `SequencePairDataset` creates independent
-encoder and decoder masks, prepends BOS to decoder inputs, appends EOS to
-targets, and ignores target padding in the loss. `EncoderDecoderTransformer`
-uses bidirectional encoder self-attention, causal decoder self-attention, and
-decoder-to-encoder cross-attention.
+| Model | Encoder self-attention | Decoder self-attention | Cross-attention |
+|---|:---:|:---:|:---:|
+| `CausalTransformer` | — | ✅ causal | — |
+| `MaskedTransformer` | ✅ bidirectional | — | — |
+| `EncoderDecoderTransformer` | ✅ bidirectional | ✅ causal | ✅ |
 
-## Quick start
+## Quickstart
+
+### 1. Install
+
+<details open>
+<summary><strong>Windows PowerShell</strong></summary>
 
 ```powershell
 py -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-pytest
 ```
 
-Run a short causal-language-model experiment:
+</details>
+
+<details>
+<summary><strong>Linux / macOS</strong></summary>
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+</details>
+
+### 2. Run the quality gate
+
+```powershell
+pytest
+ruff check .
+```
+
+### 3. Train a compact model
 
 ```powershell
 transformer-craft train `
@@ -60,11 +146,28 @@ transformer-craft train `
   --sequence-length 128
 ```
 
-Training automatically reserves 10% of windows for validation by default. Change
-the split with `--validation-fraction`; the run writes `metrics.json` containing
-training and validation loss samples.
+## CLI cookbook
 
-Resume a run from its last atomic checkpoint:
+<details>
+<summary><strong>Train on a recursive code corpus</strong></summary>
+
+```powershell
+transformer-craft train `
+  --objective causal `
+  --corpus-dir data\code `
+  --extensions .py,.js,.ts `
+  --output-dir checkpoints\code `
+  --steps 1000 `
+  --validation-fraction 0.1
+```
+
+Files are discovered recursively in deterministic path order. The default
+extensions are `.py`, `.js`, `.ts`, `.java`, `.cpp`, `.c`, `.rs`, and `.go`.
+
+</details>
+
+<details>
+<summary><strong>Resume training</strong></summary>
 
 ```powershell
 transformer-craft train `
@@ -75,7 +178,12 @@ transformer-craft train `
   --resume-from checkpoints\demo\latest.pt
 ```
 
-Evaluate a checkpoint:
+Each run can write `latest.pt`, `config.json`, and `metrics.json`.
+
+</details>
+
+<details>
+<summary><strong>Evaluate a checkpoint</strong></summary>
 
 ```powershell
 transformer-craft evaluate `
@@ -84,7 +192,12 @@ transformer-craft evaluate `
   --objective causal
 ```
 
-Generate code from a trained causal checkpoint:
+The evaluator reports token-weighted cross-entropy and perplexity.
+
+</details>
+
+<details>
+<summary><strong>Generate code</strong></summary>
 
 ```powershell
 transformer-craft generate `
@@ -95,56 +208,123 @@ transformer-craft generate `
   --top-k 40
 ```
 
-The evaluator reports token-weighted cross-entropy and perplexity rather than an
-unweighted average of batch losses. Generation truncates context to the model's
-configured maximum length and supports deterministic greedy-like sampling through
-`--top-k 1`.
+Use `--top-k 1` for greedy-like sampling. Context is automatically bounded by
+the model's configured maximum sequence length.
 
-## Repository layout
+</details>
+
+## Python API
+
+```python
+import torch
+
+from transformer_craft import CausalTransformer, ModelConfig
+
+config = ModelConfig(
+    max_sequence_length=128,
+    embedding_dimension=256,
+    attention_heads=8,
+    layers=6,
+    feed_forward_dimension=1024,
+)
+model = CausalTransformer(config)
+batch = torch.randint(0, config.vocab_size, (2, 128))
+result = model(batch, labels=batch)
+
+print(result["loss"].item())
+```
+
+## Project map
 
 ```text
 transformer_craft/
-  config.py       validated model and training configuration
-  data.py         tokenizer, windowing, masking, and datasets
-  modeling.py     attention, Transformer blocks, cross-attention, and objectives
-  training.py     reproducible training and checkpoint lifecycle
-  inference.py    generation and token-weighted evaluation
-  cli.py          train and evaluate commands
+├── config.py       validated model and training configuration
+├── data.py         tokenizer, corpus discovery, datasets, and masking
+├── modeling.py     attention, blocks, objectives, and cross-attention
+├── training.py     optimizer, scheduler, checkpoints, and validation
+├── inference.py    generation and token-weighted evaluation
+└── cli.py          train, evaluate, and generate commands
+
 tests/
-  test_data.py
-  test_modeling.py
-  test_training.py
+├── test_data.py
+├── test_corpus.py
+├── test_modeling.py
+├── test_sequence_data.py
+├── test_training.py
+├── test_inference.py
+└── test_cli.py
 ```
 
-## Design choices
+## Engineering notes
 
-### Attention
+<details>
+<summary><strong>Data contracts</strong></summary>
 
-Attention uses PyTorch's scaled dot-product attention primitive. Causal and padding masks are combined inside the attention module so callers cannot accidentally disable causal information flow when batching padded windows.
+`ByteTokenizer` preserves every UTF-8 byte and reserves IDs for padding,
+masking, BOS, and EOS. `SequencePairDataset` creates independent encoder and
+decoder masks, prepends BOS, appends EOS, and uses `-100` for ignored target
+padding.
 
-### Objectives
+</details>
 
-The causal objective shifts labels by one position and ignores padding. The masked objective selects tokens independently with a configurable masking probability and uses `-100` as the ignored label, matching PyTorch's cross-entropy convention.
+<details>
+<summary><strong>Reproducibility</strong></summary>
 
-### Reproducibility
+Seeds control Python, PyTorch, CUDA, masking, and validation split ordering.
+Resolved model and training configuration is stored with every checkpoint.
 
-Experiments accept a seed and persist the resolved configuration alongside checkpoints. Data ordering, model initialization, and masking use seeded generators. Checkpoints contain model, optimizer, scheduler, scaler, step, and configuration state. Checkpoint writes use a temporary file followed by an atomic replacement, preventing a partially written `latest.pt` from being mistaken for a valid run.
+</details>
 
-### Operational boundaries
+<details>
+<summary><strong>Reliability</strong></summary>
 
-This repository intentionally keeps storage and orchestration local: input is a text file and output is a checkpoint directory. That makes the core easy to test and deploy while leaving room for object storage, experiment tracking, distributed training, and a production tokenizer as replaceable integrations.
+Checkpoint writes use a temporary file followed by atomic replacement. Causal
+and padding masks are combined inside attention, preventing padded batches from
+silently disabling causal information flow.
+
+</details>
+
+<details>
+<summary><strong>Operational boundary</strong></summary>
+
+The current system is intentionally local: files in, checkpoints and metrics
+out. Storage, experiment tracking, distributed execution, and production
+tokenizers remain replaceable integrations rather than hidden dependencies.
+
+</details>
 
 ## Quality gates
 
 ```powershell
-ruff check .
 pytest
+ruff check .
+py -m compileall -q transformer_craft tests
 ```
 
-The test suite covers tensor shapes, causal information flow, masking invariants,
-checkpoint round trips, deterministic tokenization, dataset splitting, and
-validation metrics.
+The test suite covers tensor shapes, causal information flow, cross-attention,
+masking invariants, tokenizer behavior, corpus ordering, dataset splitting,
+checkpoint round trips, validation metrics, generation, and CLI parsing.
+
+## Roadmap
+
+| Phase | Scope | Status |
+|---|---|:---:|
+| Foundation | Core models, datasets, CLI, packaging | ✅ |
+| Training operations | Validation, resume, metrics, atomic checkpoints | ✅ |
+| Sequence modeling | Encoder-decoder and teacher forcing | ✅ |
+| Corpus tooling | Recursive multi-file discovery and filtering | ✅ |
+| Tokenizer evolution | BPE training and tokenizer benchmarks | Planned |
+| Scale-out | Distributed training and experiment tracking | Planned |
+| Delivery | CI matrix, Docker image, benchmark reports | Planned |
+
+## Contributing
+
+1. Create a focused branch.
+2. Keep commits small and feature-oriented.
+3. Add or update tests with behavior changes.
+4. Run `pytest` and `ruff check .`.
+5. Update the README when a public workflow changes.
 
 ## License
 
-This project is released under the MIT License. See [LICENSE](LICENSE).
+Released under the [MIT License](LICENSE).
