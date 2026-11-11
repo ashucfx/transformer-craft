@@ -1,5 +1,6 @@
 from .config import ModelConfig, TrainingConfig
 from .data import (
+    BPETokenizer,
     ByteTokenizer,
     CodeDataset,
     MaskedDataset,
@@ -12,6 +13,7 @@ from .modeling import CausalTransformer, MaskedTransformer
 
 __all__ = [
     "ByteTokenizer",
+    "BPETokenizer",
     "CausalTransformer",
     "CodeDataset",
     "discover_code_files",

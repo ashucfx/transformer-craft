@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 from copy import copy
 from dataclasses import dataclass
@@ -43,6 +44,90 @@ class ByteTokenizer:
         if not Path(path).is_file():
             raise FileNotFoundError(path)
         return cls()
+
+
+class BPETokenizer:
+    def __init__(self, vocabulary: dict[str, int], merges: list[tuple[str, str]]) -> None:
+        self.vocabulary = vocabulary
+        self.inverse_vocabulary = {value: key for key, value in vocabulary.items()}
+        self.merges = merges
+        self.special = SpecialTokens(
+            pad=vocabulary["<pad>"],
+            mask=vocabulary["<mask>"],
+            bos=vocabulary["<bos>"],
+            eos=vocabulary["<eos>"],
+        )
+        self.vocab_size = len(vocabulary)
+
+    @classmethod
+    def train(cls, text: str, vocab_size: int = 512) -> "BPETokenizer":
+        if vocab_size < 260:
+            raise ValueError("vocab_size must be at least 260")
+        symbols = list(text.encode("utf-8"))
+        vocabulary = {chr(index): index for index in range(256)}
+        vocabulary.update({"<pad>": 256, "<mask>": 257, "<bos>": 258, "<eos>": 259})
+        merges: list[tuple[str, str]] = []
+        sequence = [chr(value) for value in symbols]
+        while len(vocabulary) < vocab_size and len(sequence) > 1:
+            pairs: dict[tuple[str, str], int] = {}
+            for left, right in zip(sequence, sequence[1:]):
+                pairs[(left, right)] = pairs.get((left, right), 0) + 1
+            if not pairs:
+                break
+            pair = max(pairs, key=pairs.get)
+            merged = "".join(pair)
+            vocabulary[merged] = len(vocabulary)
+            merges.append(pair)
+            collapsed: list[str] = []
+            index = 0
+            while index < len(sequence):
+                if index + 1 < len(sequence) and (sequence[index], sequence[index + 1]) == pair:
+                    collapsed.append(merged)
+                    index += 2
+                else:
+                    collapsed.append(sequence[index])
+                    index += 1
+            sequence = collapsed
+        return cls(vocabulary, merges)
+
+    def encode(self, text: str, *, add_bos: bool = False, add_eos: bool = False) -> list[int]:
+        sequence = [chr(value) for value in text.encode("utf-8")]
+        for pair in self.merges:
+            merged = "".join(pair)
+            collapsed: list[str] = []
+            index = 0
+            while index < len(sequence):
+                if index + 1 < len(sequence) and (sequence[index], sequence[index + 1]) == pair:
+                    collapsed.append(merged)
+                    index += 2
+                else:
+                    collapsed.append(sequence[index])
+                    index += 1
+            sequence = collapsed
+        tokens = [self.vocabulary[symbol] for symbol in sequence]
+        if add_bos:
+            tokens.insert(0, self.special.bos)
+        if add_eos:
+            tokens.append(self.special.eos)
+        return tokens
+
+    def decode(self, tokens: list[int] | Tensor) -> str:
+        values = tokens.tolist() if isinstance(tokens, Tensor) else tokens
+        symbols = [
+            self.inverse_vocabulary[token] for token in values if token < 256 or token >= 260
+        ]
+        return bytes("".join(symbols), "latin-1").decode("utf-8", errors="replace")
+
+    def save(self, path: str | Path) -> None:
+        Path(path).write_text(
+            json.dumps({"vocabulary": self.vocabulary, "merges": self.merges}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    @classmethod
+    def load(cls, path: str | Path) -> "BPETokenizer":
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        return cls(payload["vocabulary"], [tuple(pair) for pair in payload["merges"]])
 
 
 def discover_code_files(
