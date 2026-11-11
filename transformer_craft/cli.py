@@ -10,10 +10,11 @@ from .data import (
     CausalDataset,
     CodeDataset,
     MaskedDataset,
+    SequencePairDataset,
     load_corpus_text,
 )
 from .inference import evaluate_causal, generate
-from .modeling import CausalTransformer, MaskedTransformer
+from .modeling import CausalTransformer, EncoderDecoderTransformer, MaskedTransformer
 from .training import load_checkpoint, resolve_device, train
 
 
@@ -21,8 +22,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="transformer-craft")
     commands = parser.add_subparsers(dest="command", required=True)
     train_parser = commands.add_parser("train")
-    train_parser.add_argument("--objective", choices=("causal", "masked"), default="causal")
+    train_parser.add_argument(
+        "--objective", choices=("causal", "masked", "seq2seq"), default="causal"
+    )
     _add_input_arguments(train_parser)
+    train_parser.add_argument("--target-file", type=Path)
     train_parser.add_argument("--output-dir", type=Path, required=True)
     train_parser.add_argument("--steps", type=int, default=100)
     train_parser.add_argument("--batch-size", type=int, default=8)
@@ -34,7 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser = commands.add_parser("evaluate")
     evaluate_parser.add_argument("--checkpoint", type=Path, required=True)
     _add_input_arguments(evaluate_parser)
-    evaluate_parser.add_argument("--objective", choices=("causal", "masked"), default="causal")
+    evaluate_parser.add_argument("--target-file", type=Path)
+    evaluate_parser.add_argument(
+        "--objective", choices=("causal", "masked", "seq2seq"), default="causal"
+    )
     generate_parser = commands.add_parser("generate")
     generate_parser.add_argument("--checkpoint", type=Path, required=True)
     generate_parser.add_argument("--prompt", required=True)
@@ -67,9 +74,18 @@ def _load_input_text(args: argparse.Namespace) -> str:
     return load_corpus_text([args.corpus_dir], extensions)
 
 
+def _load_sequence_pairs(args: argparse.Namespace) -> list[tuple[str, str]]:
+    if args.target_file is None:
+        raise ValueError("--target-file is required when objective is seq2seq")
+    source_lines = _load_input_text(args).splitlines()
+    target_lines = args.target_file.read_text(encoding="utf-8").splitlines()
+    if len(source_lines) != len(target_lines):
+        raise ValueError("source and target files must contain the same number of lines")
+    return list(zip(source_lines, target_lines))
+
+
 def run_train(args: argparse.Namespace) -> None:
     tokenizer = ByteTokenizer()
-    text = _load_input_text(args)
     model_config = ModelConfig(max_sequence_length=args.sequence_length)
     training_config = TrainingConfig(
         max_steps=args.steps,
@@ -77,7 +93,13 @@ def run_train(args: argparse.Namespace) -> None:
         seed=args.seed,
         device=args.device,
     )
-    if args.objective == "masked":
+    if args.objective == "seq2seq":
+        dataset = SequencePairDataset.from_text_pairs(
+            _load_sequence_pairs(args), tokenizer, args.sequence_length
+        )
+        model = EncoderDecoderTransformer(model_config)
+    elif args.objective == "masked":
+        text = _load_input_text(args)
         dataset = MaskedDataset(
             tokenizer.encode(text),
             args.sequence_length,
@@ -87,6 +109,7 @@ def run_train(args: argparse.Namespace) -> None:
         )
         model = MaskedTransformer(model_config)
     else:
+        text = _load_input_text(args)
         dataset = CausalDataset(
             tokenizer.encode(text),
             args.sequence_length,
@@ -110,14 +133,28 @@ def run_train(args: argparse.Namespace) -> None:
 def run_evaluate(args: argparse.Namespace) -> None:
     checkpoint = load_checkpoint(args.checkpoint)
     model_config = ModelConfig(**checkpoint["model_config"])
-    model = (
-        CausalTransformer(model_config)
-        if args.objective == "causal"
-        else MaskedTransformer(model_config)
-    )
+    if args.objective == "seq2seq":
+        model = EncoderDecoderTransformer(model_config)
+    else:
+        model = (
+            CausalTransformer(model_config)
+            if args.objective == "causal"
+            else MaskedTransformer(model_config)
+        )
     model.load_state_dict(checkpoint["model"])
     model.eval()
     tokenizer = ByteTokenizer()
+    if args.objective == "seq2seq":
+        dataset = SequencePairDataset.from_text_pairs(
+            _load_sequence_pairs(args), tokenizer, model_config.max_sequence_length
+        )
+        loader = DataLoader(dataset, batch_size=1)
+        losses = []
+        with torch.no_grad():
+            for batch in loader:
+                losses.append(float(model(**batch)["loss"].item()))
+        print({"loss": sum(losses) / len(losses)})
+        return
     dataset = CodeDataset(
         tokenizer.encode(_load_input_text(args)),
         model_config.max_sequence_length,
