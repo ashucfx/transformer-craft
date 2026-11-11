@@ -22,3 +22,20 @@ def test_masked_dataset_is_deterministic_and_never_masks_padding() -> None:
     assert torch.equal(first["input_ids"], second["input_ids"])
     assert first["input_ids"][-1] == 256
     assert first["labels"][-1] == -100
+
+
+def test_dataset_split_is_deterministic_and_non_empty() -> None:
+    dataset = CodeDataset(list(range(20)), sequence_length=2)
+    training, validation = dataset.split(0.25, seed=11)
+    repeat_training, repeat_validation = dataset.split(0.25, seed=11)
+    assert len(training) == 8
+    assert len(validation) == 2
+    assert training.windows == repeat_training.windows
+    assert validation.windows == repeat_validation.windows
+
+
+def test_masked_dataset_split_preserves_masking_configuration() -> None:
+    dataset = MaskedDataset(list(range(20)), sequence_length=2, probability=0.4, seed=9)
+    training, validation = dataset.split(0.25)
+    assert training.probability == validation.probability == 0.4
+    assert training.seed == validation.seed == 9

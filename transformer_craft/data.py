@@ -67,6 +67,33 @@ class CodeDataset(Dataset[dict[str, Tensor]]):
     def __len__(self) -> int:
         return len(self.windows)
 
+    def split(
+        self, validation_fraction: float, seed: int = 42
+    ) -> tuple["CodeDataset", "CodeDataset"]:
+        if not 0 < validation_fraction < 1:
+            raise ValueError("validation_fraction must be between 0 and 1")
+        if len(self.windows) < 2:
+            raise ValueError("at least two windows are required for a split")
+        generator = torch.Generator().manual_seed(seed)
+        permutation = torch.randperm(len(self.windows), generator=generator).tolist()
+        validation_size = max(1, round(len(self.windows) * validation_fraction))
+        validation_indices = permutation[:validation_size]
+        training_indices = permutation[validation_size:]
+        if not training_indices:
+            training_indices, validation_indices = permutation[:-1], permutation[-1:]
+        training = type(self).__new__(type(self))
+        validation = type(self).__new__(type(self))
+        for dataset, indices in ((training, training_indices), (validation, validation_indices)):
+            dataset.sequence_length = self.sequence_length
+            dataset.pad_id = self.pad_id
+            dataset.windows = [self.windows[index] for index in indices]
+        if isinstance(self, MaskedDataset):
+            for dataset in (training, validation):
+                dataset.mask_id = self.mask_id
+                dataset.probability = self.probability
+                dataset.seed = self.seed
+        return training, validation
+
     def __getitem__(self, index: int) -> dict[str, Tensor]:
         window = self.windows[index]
         input_ids = window[: self.sequence_length]
