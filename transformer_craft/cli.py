@@ -3,6 +3,7 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 from .benchmark import benchmark, build_model
 from .config import ModelConfig, TrainingConfig
@@ -16,7 +17,13 @@ from .data import (
 )
 from .inference import evaluate_causal, generate
 from .modeling import CausalTransformer, EncoderDecoderTransformer, MaskedTransformer
-from .training import load_checkpoint, resolve_device, train
+from .training import (
+    finalize_distributed,
+    initialize_distributed,
+    load_checkpoint,
+    resolve_device,
+    train,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -111,6 +118,7 @@ def _load_sequence_pairs(args: argparse.Namespace) -> list[tuple[str, str]]:
 
 
 def run_train(args: argparse.Namespace) -> None:
+    distributed = initialize_distributed(args.device)
     tokenizer = ByteTokenizer()
     model_config = ModelConfig(
         max_sequence_length=args.sequence_length,
@@ -157,18 +165,35 @@ def run_train(args: argparse.Namespace) -> None:
         )
         model = CausalTransformer(model_config)
     train_dataset, validation_dataset = dataset.split(args.validation_fraction, args.seed)
-    loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    validation_loader = DataLoader(validation_dataset, batch_size=args.batch_size)
-    train(
-        model,
-        loader,
-        model_config,
-        training_config,
-        args.output_dir,
-        resume_from=args.resume_from,
-        validation_loader=validation_loader,
-        run_metadata={"objective": args.objective},
+    train_sampler = DistributedSampler(train_dataset) if distributed else None
+    validation_sampler = (
+        DistributedSampler(validation_dataset, shuffle=False) if distributed else None
     )
+    loader = DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        shuffle=train_sampler is None,
+        sampler=train_sampler,
+    )
+    validation_loader = DataLoader(
+        validation_dataset,
+        batch_size=args.batch_size,
+        sampler=validation_sampler,
+    )
+    try:
+        train(
+            model,
+            loader,
+            model_config,
+            training_config,
+            args.output_dir,
+            resume_from=args.resume_from,
+            validation_loader=validation_loader,
+            run_metadata={"objective": args.objective},
+        )
+    finally:
+        if distributed:
+            finalize_distributed()
 
 
 def run_evaluate(args: argparse.Namespace) -> None:

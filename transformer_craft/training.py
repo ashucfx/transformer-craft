@@ -1,4 +1,5 @@
 import json
+import os
 import random
 import tempfile
 from pathlib import Path
@@ -6,6 +7,7 @@ from typing import Any
 
 import torch
 from torch import nn
+from torch.nn.parallel import DistributedDataParallel
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
@@ -59,6 +61,34 @@ def resolve_device(value: str) -> torch.device:
     return device
 
 
+def distributed_world_size() -> int:
+    return int(os.environ.get("WORLD_SIZE", "1"))
+
+
+def is_main_process() -> bool:
+    return int(os.environ.get("RANK", "0")) == 0
+
+
+def initialize_distributed(device: str) -> bool:
+    world_size = distributed_world_size()
+    if world_size == 1:
+        return False
+    if not torch.distributed.is_available():
+        raise RuntimeError("distributed training requires torch.distributed")
+    if not torch.distributed.is_initialized():
+        torch.distributed.init_process_group(
+            backend="nccl" if torch.cuda.is_available() else "gloo"
+        )
+    if device == "auto" and torch.cuda.is_available():
+        torch.cuda.set_device(int(os.environ.get("LOCAL_RANK", "0")))
+    return True
+
+
+def finalize_distributed() -> None:
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        torch.distributed.destroy_process_group()
+
+
 def build_scheduler(optimizer: torch.optim.Optimizer, config: TrainingConfig) -> LambdaLR:
     def schedule(step: int) -> float:
         if step < config.warmup_steps:
@@ -82,7 +112,11 @@ def save_checkpoint(
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "model": model.state_dict(),
+        "model": (
+            model.module.state_dict()
+            if isinstance(model, DistributedDataParallel)
+            else model.state_dict()
+        ),
         "optimizer": optimizer.state_dict(),
         "scheduler": scheduler.state_dict(),
         "scaler": scaler.state_dict(),
@@ -146,17 +180,25 @@ def train(
     scheduler = build_scheduler(optimizer, training_config)
     use_amp = training_config.mixed_precision and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
-    logger = RunLogger(output_dir)
-    logger.log(
-        "run_started",
-        device=str(device),
-        max_steps=training_config.max_steps,
-        **(run_metadata or {}),
-    )
+    distributed = distributed_world_size() > 1
+    if distributed:
+        model = DistributedDataParallel(
+            model,
+            device_ids=[device.index] if device.type == "cuda" else None,
+        )
+    logger = RunLogger(output_dir) if is_main_process() else None
+    if logger is not None:
+        logger.log(
+            "run_started",
+            device=str(device),
+            max_steps=training_config.max_steps,
+            **(run_metadata or {}),
+        )
     start_step = 0
     if resume_from is not None:
         checkpoint = load_checkpoint(resume_from, map_location=device)
-        model.load_state_dict(checkpoint["model"])
+        target_model = model.module if isinstance(model, DistributedDataParallel) else model
+        target_model.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         scheduler.load_state_dict(checkpoint["scheduler"])
         scaler.load_state_dict(checkpoint["scaler"])
@@ -188,18 +230,22 @@ def train(
             optimizer.zero_grad(set_to_none=True)
             scheduler.step()
         losses.append(float(loss.detach().item() * training_config.gradient_accumulation_steps))
-        logger.log("step", step=step + 1, loss=losses[-1], learning_rate=scheduler.get_last_lr()[0])
+        if logger is not None:
+            logger.log(
+                "step",
+                step=step + 1,
+                loss=losses[-1],
+                learning_rate=scheduler.get_last_lr()[0],
+            )
         evaluation_interval = max(training_config.max_steps // 10, 1)
         if validation_loader is not None and (step + 1) % evaluation_interval == 0:
             validation_losses.append(evaluate(model, validation_loader, device))
-            logger.log(
-                "validation",
-                step=step + 1,
-                loss=validation_losses[-1],
-            )
+            if logger is not None:
+                logger.log("validation", step=step + 1, loss=validation_losses[-1])
             model.train()
         if (step + 1) % max(training_config.max_steps // 10, 1) == 0:
-            save_checkpoint(
+            if logger is not None:
+                save_checkpoint(
                 Path(output_dir) / "latest.pt",
                 model,
                 optimizer,
@@ -208,7 +254,9 @@ def train(
                 step + 1,
                 model_config,
                 training_config,
-            )
+                )
+    if not is_main_process():
+        return losses
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     (Path(output_dir) / "config.json").write_text(
         json.dumps(
@@ -218,7 +266,8 @@ def train(
         + "\n",
         encoding="utf-8",
     )
-    logger.log("run_completed", step=training_config.max_steps)
+    if logger is not None:
+        logger.log("run_completed", step=training_config.max_steps)
     if validation_losses:
         (Path(output_dir) / "metrics.json").write_text(
             json.dumps(
