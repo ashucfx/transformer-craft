@@ -79,6 +79,22 @@ def load_checkpoint(path: str | Path, map_location: str | torch.device = "cpu") 
     return checkpoint
 
 
+@torch.no_grad()
+def evaluate(
+    model: nn.Module, loader: DataLoader[dict[str, torch.Tensor]], device: torch.device
+) -> float:
+    model.eval()
+    total_loss = 0.0
+    batches = 0
+    for batch in loader:
+        batch = {key: value.to(device) for key, value in batch.items()}
+        total_loss += float(model(**batch)["loss"].item())
+        batches += 1
+    if batches == 0:
+        raise ValueError("validation loader must contain at least one batch")
+    return total_loss / batches
+
+
 def train(
     model: nn.Module,
     loader: DataLoader[dict[str, torch.Tensor]],
@@ -86,6 +102,7 @@ def train(
     training_config: TrainingConfig,
     output_dir: str | Path,
     resume_from: str | Path | None = None,
+    validation_loader: DataLoader[dict[str, torch.Tensor]] | None = None,
 ) -> list[float]:
     seed_everything(training_config.seed)
     device = resolve_device(training_config.device)
@@ -109,6 +126,7 @@ def train(
         if start_step >= training_config.max_steps:
             return []
     losses: list[float] = []
+    validation_losses: list[float] = []
     model.train()
     optimizer.zero_grad(set_to_none=True)
     iterator = iter(loader)
@@ -130,6 +148,10 @@ def train(
             optimizer.zero_grad(set_to_none=True)
             scheduler.step()
         losses.append(float(loss.detach().item() * training_config.gradient_accumulation_steps))
+        evaluation_interval = max(training_config.max_steps // 10, 1)
+        if validation_loader is not None and (step + 1) % evaluation_interval == 0:
+            validation_losses.append(evaluate(model, validation_loader, device))
+            model.train()
         if (step + 1) % max(training_config.max_steps // 10, 1) == 0:
             save_checkpoint(
                 Path(output_dir) / "latest.pt",
@@ -150,4 +172,16 @@ def train(
         + "\n",
         encoding="utf-8",
     )
+    if validation_losses:
+        (Path(output_dir) / "metrics.json").write_text(
+            json.dumps(
+                {
+                    "training_loss": losses,
+                    "validation_loss": validation_losses,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     return losses

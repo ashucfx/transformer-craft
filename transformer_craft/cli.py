@@ -24,6 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--seed", type=int, default=42)
     train_parser.add_argument("--device", default="auto")
     train_parser.add_argument("--resume-from", type=Path)
+    train_parser.add_argument("--validation-fraction", type=float, default=0.1)
     evaluate_parser = commands.add_parser("evaluate")
     evaluate_parser.add_argument("--checkpoint", type=Path, required=True)
     evaluate_parser.add_argument("--text-file", type=Path, required=True)
@@ -63,7 +64,9 @@ def run_train(args: argparse.Namespace) -> None:
             tokenizer.special.pad,
         )
         model = CausalTransformer(model_config)
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    train_dataset, validation_dataset = dataset.split(args.validation_fraction, args.seed)
+    loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    validation_loader = DataLoader(validation_dataset, batch_size=args.batch_size)
     train(
         model,
         loader,
@@ -71,6 +74,7 @@ def run_train(args: argparse.Namespace) -> None:
         training_config,
         args.output_dir,
         resume_from=args.resume_from,
+        validation_loader=validation_loader,
     )
 
 
