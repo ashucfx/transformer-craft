@@ -44,6 +44,39 @@ class ByteTokenizer:
         return cls()
 
 
+def discover_code_files(
+    roots: list[str | Path],
+    extensions: set[str] | None = None,
+) -> list[Path]:
+    allowed = {
+        extension.lower()
+        for extension in (
+            extensions
+            or {".py", ".js", ".ts", ".java", ".cpp", ".c", ".rs", ".go"}
+        )
+    }
+    files: set[Path] = set()
+    for root in roots:
+        path = Path(root)
+        if path.is_file():
+            if not allowed or path.suffix.lower() in allowed:
+                files.add(path.resolve())
+            continue
+        if not path.is_dir():
+            raise FileNotFoundError(path)
+        for candidate in path.rglob("*"):
+            if candidate.is_file() and (not allowed or candidate.suffix.lower() in allowed):
+                files.add(candidate.resolve())
+    return sorted(files, key=lambda path: str(path).lower())
+
+
+def load_corpus_text(paths: list[str | Path], extensions: set[str] | None = None) -> str:
+    files = discover_code_files(paths, extensions)
+    if not files:
+        raise ValueError("no matching corpus files found")
+    return "\n".join(path.read_text(encoding="utf-8") for path in files)
+
+
 class CodeDataset(Dataset[dict[str, Tensor]]):
     def __init__(self, tokens: list[int], sequence_length: int, pad_id: int = 256) -> None:
         if sequence_length < 2:
