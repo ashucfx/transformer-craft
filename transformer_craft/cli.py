@@ -4,6 +4,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 
+from .benchmark import benchmark, build_model
 from .config import ModelConfig, TrainingConfig
 from .data import (
     ByteTokenizer,
@@ -66,6 +67,14 @@ def build_parser() -> argparse.ArgumentParser:
     generate_parser.add_argument("--top-k", type=int)
     generate_parser.add_argument("--seed", type=int, default=42)
     generate_parser.add_argument("--device", default="auto")
+    benchmark_parser = commands.add_parser("benchmark")
+    benchmark_parser.add_argument("--checkpoint", type=Path, required=True)
+    benchmark_parser.add_argument(
+        "--objective", choices=("causal", "masked", "seq2seq"), default="causal"
+    )
+    benchmark_parser.add_argument("--batch-size", type=int, default=1)
+    benchmark_parser.add_argument("--steps", type=int, default=20)
+    benchmark_parser.add_argument("--device", default="auto")
     return parser
 
 
@@ -233,11 +242,31 @@ def run_generate(args: argparse.Namespace) -> None:
     print(tokenizer.decode(tokens[0]))
 
 
+def run_benchmark(args: argparse.Namespace) -> None:
+    device = resolve_device(args.device)
+    checkpoint = load_checkpoint(args.checkpoint, map_location=device)
+    config = ModelConfig(**checkpoint["model_config"])
+    model = build_model(args.objective, config)
+    model.load_state_dict(checkpoint["model"])
+    print(
+        benchmark(
+            model,
+            args.objective,
+            config,
+            batch_size=args.batch_size,
+            steps=args.steps,
+            device=args.device,
+        )
+    )
+
+
 def main() -> None:
     args = build_parser().parse_args()
     if args.command == "train":
         run_train(args)
     elif args.command == "evaluate":
         run_evaluate(args)
-    else:
+    elif args.command == "generate":
         run_generate(args)
+    else:
+        run_benchmark(args)
