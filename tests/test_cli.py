@@ -48,3 +48,10 @@ def test_seq2seq_parser_accepts_target_file(tmp_path: Path) -> None:
     )
     assert args.objective == "seq2seq"
     assert args.target_file == tmp_path / "target.txt"
+
+
+def test_generate_parser_accepts_seed() -> None:
+    args = build_parser().parse_args(
+        ["generate", "--checkpoint", "model.pt", "--prompt", "def f():", "--seed", "7"]
+    )
+    assert args.seed == 7

@@ -48,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     generate_parser.add_argument("--max-new-tokens", type=int, default=128)
     generate_parser.add_argument("--temperature", type=float, default=0.8)
     generate_parser.add_argument("--top-k", type=int)
+    generate_parser.add_argument("--seed", type=int, default=42)
     generate_parser.add_argument("--device", default="auto")
     return parser
 
@@ -180,6 +181,9 @@ def run_evaluate(args: argparse.Namespace) -> None:
 
 def run_generate(args: argparse.Namespace) -> None:
     device = resolve_device(args.device)
+    torch.manual_seed(args.seed)
+    if device.type == "cuda":
+        torch.cuda.manual_seed_all(args.seed)
     checkpoint = load_checkpoint(args.checkpoint, map_location=device)
     model_config = ModelConfig(**checkpoint["model_config"])
     model = CausalTransformer(model_config)
