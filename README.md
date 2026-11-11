@@ -9,6 +9,7 @@ Transformer Craft is a from-scratch PyTorch implementation of a compact, extensi
 - Learned and sinusoidal positional encodings
 - Decoder-only causal language modeling
 - Encoder-only masked language modeling
+- Encoder-decoder sequence modeling with cross-attention and teacher forcing
 - Deterministic byte-level tokenization with a reserved vocabulary
 - Gradient accumulation, clipping, mixed precision, and checkpoint resume
 - Temperature/top-k text generation and token-weighted perplexity evaluation
@@ -26,9 +27,17 @@ ByteTokenizer -> fixed-length token windows -> DataLoader
    +--> CausalTransformer -> next-token loss
    |
    +--> MaskedTransformer  -> masked-token loss
+   |
+   +--> EncoderDecoderTransformer -> source-to-target loss
 ```
 
 The default tokenizer is intentionally dependency-free. It preserves every UTF-8 byte, which makes it robust for arbitrary code and avoids an implicit vocabulary-training phase. A future tokenizer can implement the same protocol without changing the model or training APIs.
+
+For paired transformation tasks, `SequencePairDataset` creates independent
+encoder and decoder masks, prepends BOS to decoder inputs, appends EOS to
+targets, and ignores target padding in the loss. `EncoderDecoderTransformer`
+uses bidirectional encoder self-attention, causal decoder self-attention, and
+decoder-to-encoder cross-attention.
 
 ## Quick start
 
@@ -97,7 +106,7 @@ configured maximum length and supports deterministic greedy-like sampling throug
 transformer_craft/
   config.py       validated model and training configuration
   data.py         tokenizer, windowing, masking, and datasets
-  modeling.py     attention, Transformer blocks, and objectives
+  modeling.py     attention, Transformer blocks, cross-attention, and objectives
   training.py     reproducible training and checkpoint lifecycle
   inference.py    generation and token-weighted evaluation
   cli.py          train and evaluate commands
