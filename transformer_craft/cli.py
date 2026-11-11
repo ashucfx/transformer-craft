@@ -5,7 +5,13 @@ import torch
 from torch.utils.data import DataLoader
 
 from .config import ModelConfig, TrainingConfig
-from .data import ByteTokenizer, CausalDataset, CodeDataset, MaskedDataset
+from .data import (
+    ByteTokenizer,
+    CausalDataset,
+    CodeDataset,
+    MaskedDataset,
+    load_corpus_text,
+)
 from .inference import evaluate_causal, generate
 from .modeling import CausalTransformer, MaskedTransformer
 from .training import load_checkpoint, resolve_device, train
@@ -16,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     train_parser = commands.add_parser("train")
     train_parser.add_argument("--objective", choices=("causal", "masked"), default="causal")
-    train_parser.add_argument("--text-file", type=Path, required=True)
+    _add_input_arguments(train_parser)
     train_parser.add_argument("--output-dir", type=Path, required=True)
     train_parser.add_argument("--steps", type=int, default=100)
     train_parser.add_argument("--batch-size", type=int, default=8)
@@ -27,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--validation-fraction", type=float, default=0.1)
     evaluate_parser = commands.add_parser("evaluate")
     evaluate_parser.add_argument("--checkpoint", type=Path, required=True)
-    evaluate_parser.add_argument("--text-file", type=Path, required=True)
+    _add_input_arguments(evaluate_parser)
     evaluate_parser.add_argument("--objective", choices=("causal", "masked"), default="causal")
     generate_parser = commands.add_parser("generate")
     generate_parser.add_argument("--checkpoint", type=Path, required=True)
@@ -39,8 +45,31 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _add_input_arguments(parser: argparse.ArgumentParser) -> None:
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument("--text-file", type=Path)
+    inputs.add_argument("--corpus-dir", type=Path)
+    parser.add_argument(
+        "--extensions",
+        default=".py,.js,.ts,.java,.cpp,.c,.rs,.go",
+        help="comma-separated corpus extensions",
+    )
+
+
+def _load_input_text(args: argparse.Namespace) -> str:
+    if args.text_file is not None:
+        return args.text_file.read_text(encoding="utf-8")
+    extensions = {
+        extension.strip()
+        for extension in args.extensions.split(",")
+        if extension.strip()
+    }
+    return load_corpus_text([args.corpus_dir], extensions)
+
+
 def run_train(args: argparse.Namespace) -> None:
     tokenizer = ByteTokenizer()
+    text = _load_input_text(args)
     model_config = ModelConfig(max_sequence_length=args.sequence_length)
     training_config = TrainingConfig(
         max_steps=args.steps,
@@ -50,7 +79,7 @@ def run_train(args: argparse.Namespace) -> None:
     )
     if args.objective == "masked":
         dataset = MaskedDataset(
-            tokenizer.encode(args.text_file.read_text(encoding="utf-8")),
+            tokenizer.encode(text),
             args.sequence_length,
             mask_id=tokenizer.special.mask,
             pad_id=tokenizer.special.pad,
@@ -59,7 +88,7 @@ def run_train(args: argparse.Namespace) -> None:
         model = MaskedTransformer(model_config)
     else:
         dataset = CausalDataset(
-            tokenizer.encode(args.text_file.read_text(encoding="utf-8")),
+            tokenizer.encode(text),
             args.sequence_length,
             tokenizer.special.pad,
         )
@@ -89,10 +118,14 @@ def run_evaluate(args: argparse.Namespace) -> None:
     model.load_state_dict(checkpoint["model"])
     model.eval()
     tokenizer = ByteTokenizer()
-    dataset = CodeDataset.from_text(args.text_file, tokenizer, model_config.max_sequence_length)
+    dataset = CodeDataset(
+        tokenizer.encode(_load_input_text(args)),
+        model_config.max_sequence_length,
+        tokenizer.special.pad,
+    )
     if args.objective == "masked":
         dataset = MaskedDataset(
-            tokenizer.encode(args.text_file.read_text(encoding="utf-8")),
+            tokenizer.encode(_load_input_text(args)),
             model_config.max_sequence_length,
             mask_id=tokenizer.special.mask,
             pad_id=tokenizer.special.pad,
