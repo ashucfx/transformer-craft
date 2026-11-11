@@ -35,6 +35,22 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--device", default="auto")
     train_parser.add_argument("--resume-from", type=Path)
     train_parser.add_argument("--validation-fraction", type=float, default=0.1)
+    train_parser.add_argument("--embedding-dimension", type=int, default=256)
+    train_parser.add_argument("--attention-heads", type=int, default=8)
+    train_parser.add_argument("--layers", type=int, default=6)
+    train_parser.add_argument("--feed-forward-dimension", type=int, default=1024)
+    train_parser.add_argument("--dropout", type=float, default=0.1)
+    train_parser.add_argument(
+        "--positional-encoding", choices=("learned", "sinusoidal"), default="learned"
+    )
+    train_parser.add_argument("--learning-rate", type=float, default=3e-4)
+    train_parser.add_argument("--weight-decay", type=float, default=0.1)
+    train_parser.add_argument("--warmup-steps", type=int, default=100)
+    train_parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
+    train_parser.add_argument("--gradient-clip-norm", type=float, default=1.0)
+    train_parser.add_argument(
+        "--mixed-precision", action=argparse.BooleanOptionalAction, default=True
+    )
     evaluate_parser = commands.add_parser("evaluate")
     evaluate_parser.add_argument("--checkpoint", type=Path, required=True)
     _add_input_arguments(evaluate_parser)
@@ -87,12 +103,26 @@ def _load_sequence_pairs(args: argparse.Namespace) -> list[tuple[str, str]]:
 
 def run_train(args: argparse.Namespace) -> None:
     tokenizer = ByteTokenizer()
-    model_config = ModelConfig(max_sequence_length=args.sequence_length)
+    model_config = ModelConfig(
+        max_sequence_length=args.sequence_length,
+        embedding_dimension=args.embedding_dimension,
+        attention_heads=args.attention_heads,
+        layers=args.layers,
+        feed_forward_dimension=args.feed_forward_dimension,
+        dropout=args.dropout,
+        positional_encoding=args.positional_encoding,
+    )
     training_config = TrainingConfig(
         max_steps=args.steps,
         batch_size=args.batch_size,
         seed=args.seed,
         device=args.device,
+        learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        warmup_steps=args.warmup_steps,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        gradient_clip_norm=args.gradient_clip_norm,
+        mixed_precision=args.mixed_precision,
     )
     if args.objective == "seq2seq":
         dataset = SequencePairDataset.from_text_pairs(

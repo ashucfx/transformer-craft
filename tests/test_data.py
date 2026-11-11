@@ -1,6 +1,6 @@
 import torch
 
-from transformer_craft.data import ByteTokenizer, CodeDataset, MaskedDataset
+from transformer_craft.data import ByteTokenizer, CodeDataset, MaskedDataset, SequencePairDataset
 
 
 def test_byte_tokenizer_round_trip() -> None:
@@ -39,3 +39,11 @@ def test_masked_dataset_split_preserves_masking_configuration() -> None:
     training, validation = dataset.split(0.25)
     assert training.probability == validation.probability == 0.4
     assert training.seed == validation.seed == 9
+
+
+def test_sequence_pair_split_preserves_pairs() -> None:
+    dataset = SequencePairDataset([([1], [2]), ([3], [4]), ([5], [6])], sequence_length=4)
+    training, validation = dataset.split(0.33, seed=3)
+    assert len(training) == 2
+    assert len(validation) == 1
+    assert sorted(training.pairs + validation.pairs) == dataset.pairs

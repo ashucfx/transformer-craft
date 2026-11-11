@@ -55,3 +55,26 @@ def test_generate_parser_accepts_seed() -> None:
         ["generate", "--checkpoint", "model.pt", "--prompt", "def f():", "--seed", "7"]
     )
     assert args.seed == 7
+
+
+def test_train_parser_exposes_model_and_optimizer_controls(tmp_path: Path) -> None:
+    args = build_parser().parse_args(
+        [
+            "train",
+            "--text-file",
+            str(tmp_path / "sample.py"),
+            "--output-dir",
+            str(tmp_path / "output"),
+            "--embedding-dimension",
+            "64",
+            "--attention-heads",
+            "4",
+            "--layers",
+            "2",
+            "--no-mixed-precision",
+        ]
+    )
+    assert args.embedding_dimension == 64
+    assert args.attention_heads == 4
+    assert args.layers == 2
+    assert args.mixed_precision is False
