@@ -144,6 +144,67 @@ class MaskedDataset(CodeDataset):
         return item
 
 
+class SequencePairDataset(Dataset[dict[str, Tensor]]):
+    def __init__(
+        self,
+        pairs: list[tuple[list[int], list[int]]],
+        sequence_length: int,
+        *,
+        pad_id: int = 256,
+        bos_id: int = 258,
+        eos_id: int = 259,
+    ) -> None:
+        if sequence_length < 2:
+            raise ValueError("sequence_length must be at least 2")
+        if not pairs:
+            raise ValueError("pairs must not be empty")
+        self.pairs = pairs
+        self.sequence_length = sequence_length
+        self.pad_id = pad_id
+        self.bos_id = bos_id
+        self.eos_id = eos_id
+
+    @classmethod
+    def from_text_pairs(
+        cls,
+        pairs: list[tuple[str, str]],
+        tokenizer: ByteTokenizer,
+        sequence_length: int,
+    ) -> "SequencePairDataset":
+        encoded = [(tokenizer.encode(source), tokenizer.encode(target)) for source, target in pairs]
+        return cls(
+            encoded,
+            sequence_length,
+            pad_id=tokenizer.special.pad,
+            bos_id=tokenizer.special.bos,
+            eos_id=tokenizer.special.eos,
+        )
+
+    def __len__(self) -> int:
+        return len(self.pairs)
+
+    def __getitem__(self, index: int) -> dict[str, Tensor]:
+        source, target = self.pairs[index]
+        source = source[: self.sequence_length]
+        target = target[: self.sequence_length - 1]
+        source_ids = source + [self.pad_id] * (self.sequence_length - len(source))
+        target_input = [self.bos_id] + target
+        target_labels = target + [self.eos_id]
+        target_input += [self.pad_id] * (self.sequence_length - len(target_input))
+        target_labels += [-100] * (self.sequence_length - len(target_labels))
+        return {
+            "encoder_input_ids": torch.tensor(source_ids, dtype=torch.long),
+            "decoder_input_ids": torch.tensor(target_input, dtype=torch.long),
+            "encoder_attention_mask": torch.tensor(
+                [token != self.pad_id for token in source_ids], dtype=torch.bool
+            ),
+            "decoder_attention_mask": torch.tensor(
+                [token != self.pad_id for token in target_input], dtype=torch.bool
+            ),
+            "labels": torch.tensor(target_labels, dtype=torch.long),
+        }
+
+
 def stream_text_files(paths: list[str | Path], chunk_size: int = 1 << 20) -> Iterator[str]:
     if chunk_size < 1:
         raise ValueError("chunk_size must be positive")
